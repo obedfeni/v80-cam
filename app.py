@@ -1,77 +1,70 @@
-# app.py
-# Production-ready Streamlit app for V380 camera with Cloudinary integration
-# Deploy to Render.com
+# app.py - TEST VERSION with simulated camera feed
+import os
+os.environ['STREAMLIT_SERVER_ENABLECORS'] = 'false'
+os.environ['STREAMLIT_SERVER_ENABLEXSRFPROTECTION'] = 'false'
 
 import streamlit as st
-import cv2
-import cloudinary
-import cloudinary.uploader
-import numpy as np
-import time
-import io
-import os
-from datetime import datetime
-import threading
-import queue
 
-# --- Page Config MUST BE FIRST STREAMLIT COMMAND ---
+# MUST BE FIRST STREAMLIT COMMAND
 st.set_page_config(
-    page_title="V380 Camera + Cloudinary",
+    page_title="V380 Camera - TEST MODE",
     page_icon="📷",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# --- Configuration from Environment Variables (Secure) ---
-# These will be set in Render's Environment Variables section
-RTSP_URL = os.getenv('RTSP_URL', 'rtsp://your_username:your_password@your_camera_ip:554/live/ch00_1')
-CLOUDINARY_CLOUD_NAME = os.getenv('CLOUDINARY_CLOUD_NAME', 'your_cloud_name')
-CLOUDINARY_API_KEY = os.getenv('CLOUDINARY_API_KEY', 'your_api_key')
-CLOUDINARY_API_SECRET = os.getenv('CLOUDINARY_API_SECRET', 'your_api_secret')
+# Clear cache
+st.cache_data.clear()
+st.cache_resource.clear()
 
-# Configure Cloudinary
-cloudinary.config(
-    cloud_name=CLOUDINARY_CLOUD_NAME,
-    api_key=CLOUDINARY_API_KEY,
-    api_secret=CLOUDINARY_API_SECRET
-)
+import numpy as np
+import cv2
+import cloudinary
+import cloudinary.uploader
+import io
+import time
+from datetime import datetime
+
+# --- Configuration ---
+RTSP_URL = os.getenv('RTSP_URL', 'rtsp://demo:demo@192.168.1.100:554/live/ch00_1')
+CLOUDINARY_CLOUD_NAME = os.getenv('CLOUDINARY_CLOUD_NAME', '')
+CLOUDINARY_API_KEY = os.getenv('CLOUDINARY_API_KEY', '')
+CLOUDINARY_API_SECRET = os.getenv('CLOUDINARY_API_SECRET', '')
+
+# Configure Cloudinary only if credentials exist
+if CLOUDINARY_CLOUD_NAME and CLOUDINARY_API_KEY and CLOUDINARY_API_SECRET:
+    cloudinary.config(
+        cloud_name=CLOUDINARY_CLOUD_NAME,
+        api_key=CLOUDINARY_API_KEY,
+        api_secret=CLOUDINARY_API_SECRET
+    )
+    cloudinary_ready = True
+else:
+    cloudinary_ready = False
 
 # --- Session State ---
 if 'camera_active' not in st.session_state:
     st.session_state.camera_active = False
 if 'frame' not in st.session_state:
     st.session_state.frame = None
-if 'upload_status' not in st.session_state:
-    st.session_status = ""
 if 'last_url' not in st.session_state:
     st.session_state.last_url = None
-if 'stop_signal' not in st.session_state:
-    st.session_state.stop_signal = False
+if 'test_mode' not in st.session_state:
+    st.session_state.test_mode = True
 
 # --- UI ---
 st.title("📷 V380 Camera + Cloudinary")
+st.warning("⚠️ TEST MODE - Using simulated camera feed (No real camera connected)")
 
 # Sidebar
 st.sidebar.header("Settings")
+st.sidebar.text_input("RTSP URL (hidden)", RTSP_URL, type="password", disabled=True)
+st.sidebar.info("💡 Update RTSP_URL in Render environment variables when ready")
 
-# Use secrets for RTSP URL in production, text input for local testing
-if os.getenv('RENDER'):
-    st.sidebar.info("Using RTSP_URL from environment variables")
-    url_input = RTSP_URL
+if cloudinary_ready:
+    st.sidebar.success("☁️ Cloudinary: Connected")
 else:
-    url_input = st.sidebar.text_input("RTSP URL", RTSP_URL, type="password")
-
-quality = st.sidebar.selectbox("Quality", ["Low (ch00_1)", "High (ch00_0)"])
-
-# Cloudinary connection test
-try:
-    # Test Cloudinary config
-    if CLOUDINARY_CLOUD_NAME != 'your_cloud_name':
-        st.sidebar.success("☁️ Cloudinary configured")
-    else:
-        st.sidebar.warning("⚠️ Using placeholder Cloudinary config")
-except Exception as e:
-    st.sidebar.error(f"Cloudinary error: {e}")
+    st.sidebar.error("☁️ Cloudinary: Not configured\nAdd env vars in Render dashboard")
 
 # Main area
 col1, col2 = st.columns([3, 1])
@@ -85,114 +78,106 @@ with col2:
     
     # Toggle camera
     if not st.session_state.camera_active:
-        if st.button("▶️ Start Stream", type="primary", use_container_width=True):
+        if st.button("▶️ Start Test Stream", type="primary", use_container_width=True):
             st.session_state.camera_active = True
-            st.session_state.stop_signal = False
             st.rerun()
     else:
         if st.button("⏹️ Stop Stream", type="secondary", use_container_width=True):
             st.session_state.camera_active = False
-            st.session_state.stop_signal = True
             st.rerun()
     
     # Capture button
-    if st.button("📸 Capture & Upload", disabled=not st.session_state.camera_active, 
-                 use_container_width=True):
-        if st.session_state.frame is not None:
-            with st.spinner("Uploading to Cloudinary..."):
-                try:
-                    # Convert frame to bytes
-                    _, buffer = cv2.imencode('.jpg', st.session_state.frame)
-                    img_bytes = io.BytesIO(buffer)
-                    
-                    # Upload to Cloudinary with timestamp
-                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                    public_id = f"v380_{timestamp}"
-                    
-                    result = cloudinary.uploader.upload(
-                        img_bytes,
-                        resource_type="image",
-                        public_id=public_id,
-                        folder="v380_camera"
-                    )
-                    
-                    st.session_state.last_url = result['secure_url']
-                    st.session_state.upload_status = "✅ Uploaded successfully!"
-                    
-                except Exception as e:
-                    st.session_state.upload_status = f"❌ Error: {str(e)}"
-            st.rerun()
+    capture_clicked = st.button(
+        "📸 Capture & Upload", 
+        disabled=not st.session_state.camera_active or not cloudinary_ready,
+        use_container_width=True,
+        help="Requires Cloudinary credentials" if not cloudinary_ready else "Capture frame"
+    )
     
-    # Status display
-    if st.session_state.get('upload_status'):
-        if "✅" in st.session_state.upload_status:
-            st.success(st.session_state.upload_status)
-        else:
-            st.error(st.session_state.upload_status)
+    if capture_clicked and st.session_state.frame is not None:
+        with st.spinner("Uploading..."):
+            try:
+                _, buffer = cv2.imencode('.jpg', st.session_state.frame)
+                img_bytes = io.BytesIO(buffer)
+                
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                result = cloudinary.uploader.upload(
+                    img_bytes,
+                    resource_type="image",
+                    public_id=f"test_v380_{timestamp}",
+                    folder="v380_test"
+                )
+                
+                st.session_state.last_url = result['secure_url']
+                st.success("✅ Uploaded!")
+                
+            except Exception as e:
+                st.error(f"❌ Upload failed: {e}")
     
-    # Last uploaded image
+    # Last upload
     if st.session_state.last_url:
         st.subheader("Last Upload")
         st.image(st.session_state.last_url, use_container_width=True)
-        st.markdown(f"[Open in Cloudinary]({st.session_state.last_url})")
+        st.markdown(f"[Open]({st.session_state.last_url})")
 
-# --- Camera Loop with proper cleanup ---
-def run_camera():
-    # Adjust URL for quality selection
-    url = url_input
-    if "ch00_" in url:
-        base = url.rsplit("ch00_", 1)[0]
-        ch = "0" if "High" in quality else "1"
-        url = f"{base}ch00_{ch}"
+# --- Simulated Camera Feed ---
+def generate_test_frame(counter):
+    """Generate a test pattern frame"""
+    # Create 640x480 frame
+    frame = np.zeros((480, 640, 3), dtype=np.uint8)
     
-    # OpenCV Video Capture with timeout settings
-    cap = cv2.VideoCapture(url)
-    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+    # Moving gradient background
+    offset = counter % 640
+    for i in range(640):
+        color = int(255 * ((i + offset) % 640) / 640)
+        frame[:, i, 0] = color  # Blue channel
+        frame[:, i, 1] = 128    # Green channel
+        frame[:, i, 2] = 255 - color  # Red channel
     
-    # Set connection timeout (3 seconds)
-    cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 3000)
-    cap.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, 3000)
+    # Add timestamp text
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    text = f"TEST MODE - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+    cv2.putText(frame, text, (50, 50), font, 0.8, (255, 255, 255), 2)
     
-    if not cap.isOpened():
-        status_placeholder.error("❌ Failed to connect to camera. Check RTSP URL.")
-        st.session_state.camera_active = False
-        return
+    # Add frame counter
+    counter_text = f"Frame: {counter}"
+    cv2.putText(frame, counter_text, (50, 100), font, 0.8, (0, 255, 0), 2)
     
-    status_placeholder.info("🎥 Camera connected - Streaming...")
+    # Add "NO CAMERA" warning
+    cv2.putText(frame, "NO CAMERA CONNECTED", (50, 240), font, 1.2, (0, 0, 255), 3)
+    cv2.putText(frame, "Using simulated feed", (50, 280), font, 0.6, (200, 200, 200), 1)
     
-    frame_count = 0
-    while st.session_state.camera_active and not st.session_state.stop_signal:
-        ret, frame = cap.read()
-        if not ret:
-            frame_count += 1
-            if frame_count > 30:  # Allow some buffer frames
-                status_placeholder.warning("⚠️ Connection lost. Retrying...")
-                time.sleep(1)
-                break
-            continue
-        
-        frame_count = 0
+    return frame
+
+def run_test_camera():
+    """Simulated camera loop"""
+    status_placeholder.info("🎥 Test stream running (Simulated)")
+    counter = 0
+    
+    while st.session_state.camera_active:
+        frame = generate_test_frame(counter)
         st.session_state.frame = frame.copy()
         
-        # Convert BGR to RGB for Streamlit
+        # Convert BGR to RGB
         frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        
-        # Display frame
         frame_placeholder.image(frame_rgb, channels="RGB", use_container_width=True)
         
-        # Control frame rate (~15 FPS)
-        time.sleep(0.066)
-    
-    # Cleanup
-    cap.release()
-    frame_placeholder.empty()
-    status_placeholder.info("⏹️ Stream stopped")
-    st.session_state.camera_active = False
+        counter += 1
+        time.sleep(0.1)  # 10 FPS
 
 # Run camera if active
 if st.session_state.camera_active:
-    run_camera()
+    run_test_camera()
+    frame_placeholder.empty()
+    status_placeholder.info("⏹️ Stream stopped")
 
-# Footer
+# Instructions for when you get the router IP
 st.sidebar.markdown("---")
-st.sidebar.markdown("🔧 [Render Deployment Guide](https://render.com/docs/deploy-streamlit)")
+st.sidebar.subheader("Next Steps:")
+st.sidebar.markdown("""
+1. ✅ Fix this error first
+2. 🏠 Get your router's public IP
+3. 🔧 Set up port forwarding (port 554)
+4. 📝 Update `RTSP_URL` in Render env vars
+5. 🚀 Switch to real camera
+""")
