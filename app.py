@@ -14,7 +14,7 @@ import threading
 import queue
 
 # --- Configuration ---
-RTSP_URL = 'rtsp://your_username:your_password@your_camera_ip:554/live/ch00_1'
+RTSP_URL = 'rtsp://Atm drinking bar:Atm0543978023@:192.168.100.124:554/live/ch00_1'
 CLOUDINARY_CLOUD_NAME = 'your_cloud_name'
 CLOUDINARY_API_KEY = 'your_api_key'
 CLOUDINARY_API_SECRET = 'your_api_secret'
